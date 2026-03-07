@@ -1,6 +1,198 @@
 #include "setup.hpp"
+#include <fstream>
+#include <sstream>
+using std::stringstream;
+using std::ifstream;
+using std::getline;
 
 
+// ═══════════════════════════════════════════════════════════════════
+// Custom main_setup: reads voxels.bin + config.json from staging/
+// Required extensions in defines.hpp: EQUILIBRIUM_BOUNDARIES, INTERACTIVE_GRAPHICS
+// ═══════════════════════════════════════════════════════════════════
+
+#ifndef BENCHMARK
+// Minimal JSON value extractor (no external library needed)
+static string json_get_string(const string& json, const string& key) {
+	const string search = "\"" + key + "\"";
+	size_t pos = json.find(search);
+	if(pos == string::npos) return "";
+	pos = json.find(':', pos);
+	if(pos == string::npos) return "";
+	pos++;
+	while(pos < json.size() && (json[pos] == ' ' || json[pos] == '"')) pos++;
+	size_t end = json.find_first_of("\",}", pos);
+	return json.substr(pos, end - pos);
+}
+static float json_get_float(const string& json, const string& key, float default_val = 0.0f) {
+	string val = json_get_string(json, key);
+	if(val.empty()) return default_val;
+	return (float)atof(val.c_str());
+}
+static vector<int> json_get_int_array(const string& json, const string& key) {
+	vector<int> result;
+	const string search = "\"" + key + "\"";
+	size_t pos = json.find(search);
+	if(pos == string::npos) return result;
+	pos = json.find('[', pos);
+	if(pos == string::npos) return result;
+	size_t end = json.find(']', pos);
+	string arr = json.substr(pos + 1, end - pos - 1);
+	stringstream ss(arr);
+	string token;
+	while(getline(ss, token, ',')) {
+		result.push_back(atoi(token.c_str()));
+	}
+	return result;
+}
+static float json_get_float_in_boundaries(const string& json, const string& bc_type, const string& key, float default_val = 0.0f) {
+	// Find the boundary block of the given type
+	size_t pos = json.find("\"" + bc_type + "\"");
+	if(pos == string::npos) return default_val;
+	// Search backwards for the enclosing {
+	size_t brace = json.rfind('{', pos);
+	if(brace == string::npos) return default_val;
+	size_t end_brace = json.find('}', pos);
+	string block = json.substr(brace, end_brace - brace + 1);
+	return json_get_float(block, key, default_val);
+}
+static vector<float> json_get_velocity_in_boundaries(const string& json, const string& bc_type) {
+	vector<float> result;
+	size_t pos = json.find("\"" + bc_type + "\"");
+	if(pos == string::npos) return result;
+	size_t vel_pos = json.find("\"velocity\"", pos);
+	if(vel_pos == string::npos) return result;
+	size_t arr_start = json.find('[', vel_pos);
+	size_t arr_end = json.find(']', arr_start);
+	string arr = json.substr(arr_start + 1, arr_end - arr_start - 1);
+	stringstream ss(arr);
+	string token;
+	while(getline(ss, token, ',')) {
+		result.push_back((float)atof(token.c_str()));
+	}
+	return result;
+}
+
+void main_setup() { // Custom setup: reads external voxel data from bridge staging directory
+	// Determine staging directory: use command line arg or default path
+	string staging_dir;
+	if(!main_arguments.empty()) {
+		staging_dir = main_arguments[0];
+		// Normalize backslashes to forward slashes
+		for(char& c : staging_dir) if(c == '\\') c = '/';
+	} else {
+		staging_dir = get_exe_path() + "../../bridge/staging";
+	}
+
+	// Read config.json
+	const string config_path = staging_dir + "/config.json";
+	print_info("Reading config from: " + config_path);
+	string config_json;
+	{
+		std::ifstream f(config_path);
+		if(f.fail()) {
+			print_error("Config file not found: " + config_path + ". Run the frontend 'Run FluidX3D' button first.");
+		}
+		std::stringstream buf;
+		buf << f.rdbuf();
+		config_json = buf.str();
+	}
+
+	// Parse resolution
+	vector<int> res = json_get_int_array(config_json, "resolution");
+	uint Nx = res.size() >= 1 ? (uint)res[0] : 128u;
+	uint Ny = res.size() >= 2 ? (uint)res[1] : 128u;
+	uint Nz = res.size() >= 3 ? (uint)res[2] : 128u;
+
+	// Parse viscosity
+	float nu = json_get_float(config_json, "viscosity", 0.01f);
+
+	print_info("Grid: " + to_string(Nx) + "x" + to_string(Ny) + "x" + to_string(Nz) + ", nu=" + to_string(nu, 4u));
+
+	// Read voxels.bin
+	const string voxel_path = staging_dir + "/voxels.bin";
+	print_info("Reading voxels from: " + voxel_path);
+	uchar* voxel_data = nullptr;
+	const ulong expected_size = (ulong)Nx * (ulong)Ny * (ulong)Nz;
+	{
+		std::ifstream f(voxel_path, std::ios::binary | std::ios::ate);
+		if(f.fail()) {
+			print_error("Voxel file not found: " + voxel_path);
+		}
+		const ulong file_size = (ulong)f.tellg();
+		if(file_size != expected_size) {
+			print_error("Voxel file size mismatch: expected " + to_string(expected_size) + " bytes, got " + to_string(file_size));
+		}
+		voxel_data = new uchar[expected_size];
+		f.seekg(0, std::ios::beg);
+		f.read((char*)voxel_data, expected_size);
+		f.close();
+	}
+
+	// Parse inlet velocity from config
+	vector<float> inlet_vel = json_get_velocity_in_boundaries(config_json, "inlet");
+	float ux = inlet_vel.size() >= 1 ? inlet_vel[0] : 0.1f;
+	float uy = inlet_vel.size() >= 2 ? inlet_vel[1] : 0.0f;
+	float uz = inlet_vel.size() >= 3 ? inlet_vel[2] : 0.0f;
+	print_info("Inlet velocity: (" + to_string(ux, 3u) + ", " + to_string(uy, 3u) + ", " + to_string(uz, 3u) + ")");
+
+	// Count cell types
+	uint solid_count = 0u, inlet_count = 0u, outlet_count = 0u, fluid_count = 0u;
+	for(ulong i = 0ull; i < expected_size; i++) {
+		switch(voxel_data[i]) {
+			case 0: fluid_count++;  break;
+			case 1: solid_count++;  break;
+			case 2: inlet_count++;  break;
+			case 3: outlet_count++; break;
+		}
+	}
+	print_info("Cells: fluid=" + to_string(fluid_count) + ", solid=" + to_string(solid_count) +
+	           ", inlet=" + to_string(inlet_count) + ", outlet=" + to_string(outlet_count));
+
+	// ═══════════════════════ Create LBM simulation ═══════════════════════
+	LBM lbm(Nx, Ny, Nz, nu);
+
+	// Map voxel data to LBM flags and velocity
+	// Voxel encoding: 0=fluid, 1=solid(TYPE_S), 2=inlet(TYPE_E), 3=outlet(TYPE_E)
+	parallel_for(lbm.get_N(), [&](ulong n) {
+		uint x = 0u, y = 0u, z = 0u;
+		lbm.coordinates(n, x, y, z);
+		const ulong voxel_idx = (ulong)x + (ulong)y * (ulong)Nx + (ulong)z * (ulong)Nx * (ulong)Ny;
+
+		if(voxel_idx < expected_size) {
+			const uchar cell_type = voxel_data[voxel_idx];
+			switch(cell_type) {
+				case 1: // Solid wall
+					lbm.flags[n] = TYPE_S;
+					break;
+				case 2: // Inlet boundary
+					lbm.flags[n] = TYPE_E;
+					lbm.u.x[n] = ux;
+					lbm.u.y[n] = uy;
+					lbm.u.z[n] = uz;
+					break;
+				case 3: // Outlet boundary
+					lbm.flags[n] = TYPE_E;
+					break;
+				default: // Fluid (0) or anything else
+					break;
+			}
+		}
+
+		// Also mark simulation box boundaries as TYPE_E (equilibrium) if not already solid
+		if((x == 0u || x == Nx - 1u || y == 0u || y == Ny - 1u || z == 0u || z == Nz - 1u) && lbm.flags[n] != TYPE_S) {
+			lbm.flags[n] = TYPE_E;
+		}
+	});
+
+	delete[] voxel_data;
+
+	// ═══════════════════════ Configure visualization ═══════════════════════
+	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION;
+	print_info("Simulation ready. Starting FluidX3D...");
+	lbm.run();
+}
+#endif // !BENCHMARK
 
 #ifdef BENCHMARK
 #include "info.hpp"
