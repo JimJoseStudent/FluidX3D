@@ -188,8 +188,19 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 	delete[] voxel_data;
 
 	// ═══════════════════════ Configure visualization ═══════════════════════
-	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION;
-	print_info("Simulation ready. Starting FluidX3D...");
+	// Use multiple visualization modes for better initial visibility
+	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION | VIS_STREAMLINES;
+
+	const float solid_percent = 100.0f * (float)solid_count / (float)(Nx * Ny * Nz);
+	print_info("Solid cells: " + to_string(solid_percent, 1u) + "% of grid");
+	if(solid_count == 0u) {
+		print_warning("No solid cells found! Check that the voxel data contains geometry (cell type 1).");
+	}
+	if(solid_percent < 0.1f) {
+		print_warning("Very few solid cells (" + to_string(solid_percent, 2u) + "%). Geometry may be too small relative to grid.");
+	}
+
+	print_info("Simulation ready. Starting FluidX3D (press P to pause/resume, mouse to orbit)...");
 	lbm.run();
 }
 #endif // !BENCHMARK
