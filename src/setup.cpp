@@ -138,6 +138,14 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 
 	// Count cell types
 	uint solid_count = 0u, inlet_count = 0u, outlet_count = 0u, fluid_count = 0u;
+
+	// Parse wall velocity and temperature from config
+	vector<float> wall_vel = json_get_velocity_in_boundaries(config_json, "wall");
+	float wall_ux = wall_vel.size() >= 1 ? wall_vel[0] : 0.0f;
+	float wall_uy = wall_vel.size() >= 2 ? wall_vel[1] : 0.0f;
+	float wall_uz = wall_vel.size() >= 3 ? wall_vel[2] : 0.0f;
+	float wall_temp = json_get_float_in_boundaries(config_json, "wall", "temperature", 500.0f);
+	float inlet_temp = json_get_float_in_boundaries(config_json, "inlet", "temperature", 20.0f);
 	for(ulong i = 0ull; i < expected_size; i++) {
 		switch(voxel_data[i]) {
 			case 0: fluid_count++;  break;
@@ -164,12 +172,25 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 			switch(cell_type) {
 				case 1: // Solid wall
 					lbm.flags[n] = TYPE_S;
+#ifdef MOVING_BOUNDARIES
+					if (wall_ux != 0.0f || wall_uy != 0.0f || wall_uz != 0.0f) {
+						lbm.u.x[n] = wall_ux;
+						lbm.u.y[n] = wall_uy;
+						lbm.u.z[n] = wall_uz;
+					}
+#endif
+#ifdef TEMPERATURE
+					lbm.T[n] = wall_temp;
+#endif
 					break;
 				case 2: // Inlet boundary
 					lbm.flags[n] = TYPE_E;
 					lbm.u.x[n] = ux;
 					lbm.u.y[n] = uy;
 					lbm.u.z[n] = uz;
+#ifdef TEMPERATURE
+					lbm.T[n] = inlet_temp;
+#endif
 					break;
 				case 3: // Outlet boundary
 					lbm.flags[n] = TYPE_E;
@@ -200,8 +221,51 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 		print_warning("Very few solid cells (" + to_string(solid_percent, 2u) + "%). Geometry may be too small relative to grid.");
 	}
 
-	print_info("Simulation ready. Starting FluidX3D (press P to pause/resume, mouse to orbit)...");
-	lbm.run();
+	print_info("Simulation ready. Starting FluidX3D exporting to " + staging_dir + "...");
+	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION | VIS_STREAMLINES;
+
+	// Export setup
+	string results_path = staging_dir + "/results.bin";
+	string temp_path = staging_dir + "/results.tmp";
+	int scale = max(1u, Nx / 32u); // downsample to approx 32^3
+	int dNx = Nx / scale;
+	int dNy = Ny / scale;
+	int dNz = Nz / scale;
+	vector<float> vdata(dNx * dNy * dNz * 4); // [vx, vy, vz, rho]
+
+#ifdef INTERACTIVE_GRAPHICS
+	while(running) {
+		lbm.run(40u); // run 40 steps per frame
+#else
+	while(true) {
+		lbm.run(40u);
+#endif
+		lbm.u.read_from_device();
+		lbm.rho.read_from_device();
+
+		int idx = 0;
+		for(uint z=0; z<dNz; z++) {
+			for(uint y=0; y<dNy; y++) {
+				for(uint x=0; x<dNx; x++) {
+					ulong n = lbm.index(x*scale, y*scale, z*scale);
+					vdata[idx++] = lbm.u.x[n];
+					vdata[idx++] = lbm.u.y[n];
+					vdata[idx++] = lbm.u.z[n];
+					vdata[idx++] = lbm.rho[n];
+				}
+			}
+		}
+
+		int h[7] = {dNx, dNy, dNz, (int)lbm.get_t(), scale, 1, 1};
+		std::ofstream out(temp_path, std::ios::binary);
+		if(out.is_open()) {
+			out.write((char*)h, 28);
+			out.write((char*)vdata.data(), vdata.size() * sizeof(float));
+			out.close();
+			std::remove(results_path.c_str());
+			std::rename(temp_path.c_str(), results_path.c_str());
+		}
+	}
 }
 #endif // !BENCHMARK
 
