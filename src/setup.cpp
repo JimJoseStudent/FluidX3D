@@ -201,8 +201,17 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 		}
 
 		// Also mark simulation box boundaries as TYPE_E (equilibrium) if not already solid
-		if((x == 0u || x == Nx - 1u || y == 0u || y == Ny - 1u || z == 0u || z == Nz - 1u) && lbm.flags[n] != TYPE_S) {
+		if((x == 0u || x == Nx - 1u || y == 0u || y == Ny - 1u || z == 0u || z == Nz - 1u) && lbm.flags[n] != TYPE_S && lbm.flags[n] != TYPE_E) {
 			lbm.flags[n] = TYPE_E;
+			if(y == 0u) {
+				lbm.u.x[n] = ux;
+				lbm.u.y[n] = uy;
+				lbm.u.z[n] = uz;
+			} else {
+				lbm.u.x[n] = 0.0f;
+				lbm.u.y[n] = 0.0f;
+				lbm.u.z[n] = 0.0f;
+			}
 		}
 	});
 
