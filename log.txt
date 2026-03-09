@@ -1,0 +1,39 @@
+.-----------------------------------------------------------------------------.
+|                       ______________   ______________                       |
+|                       \   ________  | |  ________   /                       |
+|                        \  \       | | | |       /  /                        |
+|                         \  \      | | | |      /  /                         |
+|                          \  \     | | | |     /  /                          |
+|                           \  \_.-"  | |  "-._/  /                           |
+|                            \    _.-" _ "-._    /                            |
+|                             \.-" _.-" "-._ "-./                             |
+|                               .-"  .-"-.  "-.                               |
+|                               \  v"     "v  /                               |
+|                                \  \     /  /                                |
+|                                 \  \   /  /                                 |
+|                                  \  \ /  /                                  |
+|                                   \  '  /                                   |
+|                                    \   /                                    |
+|                                     \ /                FluidX3D Version 3.5 |
+|                                      '     Copyright (c) Dr. Moritz Lehmann |
+|-----------------------------------------------------------------------------|
+
+| Info: Reading config from: d:/Fluidx3D custom/bridge/staging/config.json    |
+
+| Info: Grid: 128x128x128, nu=0.0100                                          |
+
+| Info: Reading voxels from: d:/Fluidx3D custom/bridge/staging/voxels.bin     |
+
+| Info: Inlet velocity: (0.000, 0.100, 0.000)                                 |
+
+| Info: Cells: fluid=2097152, solid=0, inlet=0, outlet=0                      |
+
+|----------------.------------------------------------------------------------|
+| Device ID    0 | NVIDIA GeForce RTX 4070                                    |
+| Device ID    1 | Intel(R) UHD Graphics 770                                  |
+|----------------'------------------------------------------------------------|
+
+| Error: "d:\Fluidx3D custom\bridge\staging" cannot be parsed to uint.        |
+
+|        Press Enter to exit.                                                 |
+'-----------------------------------------------------------------------------'

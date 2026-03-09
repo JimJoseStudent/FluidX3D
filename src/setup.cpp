@@ -78,6 +78,7 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 	string staging_dir;
 	if(!main_arguments.empty()) {
 		staging_dir = main_arguments[0];
+		main_arguments.clear(); // Clear it so LBM constructor doesn't try to parse it as a GPU Device ID!
 		// Normalize backslashes to forward slashes
 		for(char& c : staging_dir) if(c == '\\') c = '/';
 	} else {
@@ -218,8 +219,10 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 	delete[] voxel_data;
 
 	// ═══════════════════════ Configure visualization ═══════════════════════
+#if defined(GRAPHICS) || defined(INTERACTIVE_GRAPHICS)
 	// Use multiple visualization modes for better initial visibility
 	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION | VIS_STREAMLINES;
+#endif
 
 	const float solid_percent = 100.0f * (float)solid_count / (float)(Nx * Ny * Nz);
 	print_info("Solid cells: " + to_string(solid_percent, 1u) + "% of grid");
@@ -231,7 +234,6 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 	}
 
 	print_info("Simulation ready. Starting FluidX3D exporting to " + staging_dir + "...");
-	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE | VIS_Q_CRITERION | VIS_STREAMLINES;
 
 	// Export setup
 	string results_path = staging_dir + "/results.bin";
