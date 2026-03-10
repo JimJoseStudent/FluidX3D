@@ -238,11 +238,19 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 	// Export setup
 	string results_path = staging_dir + "/results.bin";
 	string temp_path = staging_dir + "/results.tmp";
+	string velocity_path = staging_dir + "/velocity.bin";
+	string pressure_path = staging_dir + "/pressure.bin";
+	string density_path = staging_dir + "/density.bin";
+	string status_path = staging_dir + "/status.json";
 	int scale = max(1u, Nx / 32u); // downsample to approx 32^3
 	int dNx = Nx / scale;
 	int dNy = Ny / scale;
 	int dNz = Nz / scale;
-	vector<float> vdata(dNx * dNy * dNz * 4); // [vx, vy, vz, rho]
+	int dN = dNx * dNy * dNz;
+	vector<float> vdata(dN * 4); // [vx, vy, vz, rho]
+	vector<float> vel_field(dN * 4); // [ux, uy, uz, mag] for velocity.bin
+	vector<float> pressure_field(dN); // scalar pressure
+	vector<float> density_field(dN); // scalar density
 
 #ifdef INTERACTIVE_GRAPHICS
 	while(running) {
@@ -255,26 +263,71 @@ void main_setup() { // Custom setup: reads external voxel data from bridge stagi
 		lbm.rho.read_from_device();
 
 		int idx = 0;
+		int sidx = 0;
 		for(uint z=0; z<dNz; z++) {
 			for(uint y=0; y<dNy; y++) {
 				for(uint x=0; x<dNx; x++) {
 					ulong n = lbm.index(x*scale, y*scale, z*scale);
-					vdata[idx++] = lbm.u.x[n];
-					vdata[idx++] = lbm.u.y[n];
-					vdata[idx++] = lbm.u.z[n];
-					vdata[idx++] = lbm.rho[n];
+					float ux_n = lbm.u.x[n];
+					float uy_n = lbm.u.y[n];
+					float uz_n = lbm.u.z[n];
+					float rho_n = lbm.rho[n];
+					float mag = sqrtf(ux_n*ux_n + uy_n*uy_n + uz_n*uz_n);
+
+					// Legacy results.bin format
+					vdata[idx++] = ux_n;
+					vdata[idx++] = uy_n;
+					vdata[idx++] = uz_n;
+					vdata[idx++] = rho_n;
+
+					// Phase 17 field exports
+					vel_field[4*sidx] = ux_n;
+					vel_field[4*sidx+1] = uy_n;
+					vel_field[4*sidx+2] = uz_n;
+					vel_field[4*sidx+3] = mag;
+					pressure_field[sidx] = (rho_n - 1.0f) / 3.0f; // p = (rho-1)*cs²
+					density_field[sidx] = rho_n;
+					sidx++;
 				}
 			}
 		}
 
+		// Write legacy results.bin (atomic rename)
 		int h[7] = {dNx, dNy, dNz, (int)lbm.get_t(), scale, 1, 1};
-		std::ofstream out(temp_path, std::ios::binary);
-		if(out.is_open()) {
-			out.write((char*)h, 28);
-			out.write((char*)vdata.data(), vdata.size() * sizeof(float));
-			out.close();
-			std::remove(results_path.c_str());
-			std::rename(temp_path.c_str(), results_path.c_str());
+		{
+			std::ofstream out(temp_path, std::ios::binary);
+			if(out.is_open()) {
+				out.write((char*)h, 28);
+				out.write((char*)vdata.data(), vdata.size() * sizeof(float));
+				out.close();
+				std::remove(results_path.c_str());
+				std::rename(temp_path.c_str(), results_path.c_str());
+			}
+		}
+
+		// Write Phase 17 binary field files
+		{
+			std::ofstream vf(velocity_path, std::ios::binary);
+			if(vf.is_open()) vf.write((char*)vel_field.data(), vel_field.size() * sizeof(float));
+		}
+		{
+			std::ofstream pf(pressure_path, std::ios::binary);
+			if(pf.is_open()) pf.write((char*)pressure_field.data(), pressure_field.size() * sizeof(float));
+		}
+		{
+			std::ofstream df(density_path, std::ios::binary);
+			if(df.is_open()) df.write((char*)density_field.data(), density_field.size() * sizeof(float));
+		}
+
+		// Write status.json for bridge polling
+		{
+			std::ofstream sf(status_path);
+			if(sf.is_open()) {
+				sf << "{\"timestep\":" << lbm.get_t()
+				   << ",\"grid\":[" << dNx << "," << dNy << "," << dNz << "]"
+				   << ",\"scale\":" << scale
+				   << "}" << std::endl;
+			}
 		}
 	}
 }
